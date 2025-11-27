@@ -45,24 +45,7 @@ TerminalLoop:
 
     cmp cx, MAX_INPUT_LEN  ; Check for buffer overflow
     jl .ReadInputLoop      ; If not full, continue reading
-    jmp .HandleEnter       ; If full, treat as enter
-
-.HandleBackspace:
-    cmp cx, 0              ; Any chars to backspace?
-    je .ReadInputLoop      ; No, ignore backspace
-
-    dec di                 ; Move back in buffer
-    dec cx                 ; Decrement character count
-
-    ; Erase character from screen: backspace, space, backspace
-    mov ah, 0x0E
-    mov al, 0x08           ; Backspace
-    int 0x10
-    mov al, ' '            ; Space
-    int 0x10
-    mov al, 0x08           ; Backspace again
-    int 0x10
-    jmp .ReadInputLoop
+    ; If full, fall through to HandleEnter as no more input can be taken
 
 .HandleEnter:
     mov byte [di], 0       ; Null-terminate the input string
@@ -72,17 +55,116 @@ TerminalLoop:
     mov al, 13
     int 0x10
 
-    ; --- Process Command (for now, just echo it) ---
-    mov si, EchoMessage    ; Print 'You typed: '
-    call PrintString
-    mov si, InputBuffer    ; Print the input buffer
-    call PrintString
-    mov al, 10             ; Newline
-    int 0x10
-    mov al, 13             ; Carriage return
-    int 0x10
+    ; --- Process Command ---
+    mov si, InputBuffer    ; SI points to the start of the input string
+    call ParseAndExecute   ; Go to command parser
 
     jmp TerminalLoop       ; Go back to prompt for next command
+
+; --- ParseAndExecute Procedure ---
+; Input: SI = Address of the input string (command line)
+ParseAndExecute:
+    ; Find the first space to separate command from arguments
+    push si                 ; Save SI (start of command string)
+    mov di, si              ; DI will scan for space
+.FindSpaceLoop:
+    cmp byte [di], ' '     ; Is it a space?
+    je .SpaceFound
+    cmp byte [di], 0        ; End of string?
+    je .NoSpaceFound
+    inc di
+    jmp .FindSpaceLoop
+
+.SpaceFound:
+    mov byte [di], 0        ; Null-terminate the command part
+    inc di                  ; DI now points to the start of arguments (or null if no args)
+    mov bx, di              ; BX now holds address of arguments
+    jmp .CommandCheck
+
+.NoSpaceFound:
+    xor bx, bx              ; No arguments (BX = 0)
+
+.CommandCheck:
+    pop si                  ; Restore SI to point to command
+
+    ; --- Check for 'help' command ---
+    push bx                 ; Save BX (arguments address)
+    mov di, HelpCmd         ; DI points to 'help' string
+    call StrCmp             ; Compare command with 'help'
+    cmp ax, 0               ; If AX == 0, strings are equal
+    je .ExecuteHelp
+    pop bx                  ; Restore BX
+
+    ; --- Check for 'clear' command ---
+    push bx                 ; Save BX
+    mov di, ClearCmd        ; DI points to 'clear' string
+    call StrCmp
+    cmp ax, 0
+    je .ExecuteClear
+    pop bx                  ; Restore BX
+
+    ; --- Check for 'echo' command ---
+    push bx                 ; Save BX
+    mov di, EchoCmd         ; DI points to 'echo' string
+    call StrCmp
+    cmp ax, 0
+    je .ExecuteEcho
+    pop bx                  ; Restore BX
+
+    ; --- Unknown Command ---
+    mov si, UnknownCmdMsg   ; Load 'Unknown command' message
+    call PrintString
+    jmp .EndExecute
+
+.ExecuteHelp:
+    pop bx                  ; Discard saved BX, not needed for help
+    mov si, HelpMessage
+    call PrintString
+    jmp .EndExecute
+
+.ExecuteClear:
+    pop bx                  ; Discard saved BX
+    call ClearScreen
+    jmp .EndExecute
+
+.ExecuteEcho:
+    pop bx                  ; BX now holds argument address (or 0 if none)
+    cmp bx, 0               ; Any arguments?
+    je .EchoNoArgs          ; If no args, just print newline
+    mov si, bx              ; SI points to the argument string
+    call PrintString
+    jmp .EndExecute
+.EchoNoArgs:
+    ; Just print newline (already done by .HandleEnter, but keep for consistency)
+    ; Not strictly needed here as newlines are handled after command execution
+    jmp .EndExecute
+
+.EndExecute:
+    ret                     ; Return from ParseAndExecute
+
+; --- StrCmp Procedure ---
+; Input: SI = Ptr to string 1, DI = Ptr to string 2
+; Output: AX = 0 if equal, non-zero if not equal
+StrCmp:
+    push cx                 ; Save CX
+.CompareLoop:
+    mov cl, [si]            ; Get char from string 1
+    mov ch, [di]            ; Get char from string 2
+    cmp cl, ch              ; Compare characters
+    jne .NotEqual
+    cmp cl, 0               ; End of string 1 (and thus string 2 if equal so far)?
+    je .Equal
+    inc si
+    inc di
+    jmp .CompareLoop
+.NotEqual:
+    mov ax, 1               ; Set AX to non-zero (not equal)
+    jmp .EndStrCmp
+.Equal:
+    mov ax, 0               ; Set AX to 0 (equal)
+.EndStrCmp:
+    pop cx                  ; Restore CX
+    ret
 
 ; --- PrintString Procedure ---
 ; Input: SI = Address of null-terminated string
@@ -108,8 +190,22 @@ ReadKey:
     ; AH contains scan code, AL contains ASCII code
     ret                 ; Return from procedure
 
+; --- ClearScreen Procedure ---
+ClearScreen:
+    mov ah, 0x00        ; BIOS Set Video Mode function
+    mov al, 0x03        ; Text mode 80x25, 16 colors, 8 pages
+    int 0x10            ; Call BIOS video services
+    ret
+
 ; --- Data ---
-KernelMessage1 db "Welcome to YannaOS Terminal!", 10, 13, 0
+KernelMessage1 db "Welcome to YannaOS Terminal! Type 'help' for commands.", 10, 13, 0
 PromptMessage  db "YannaOS> ", 0
-EchoMessage    db "You typed: ", 0
+UnknownCmdMsg  db "Unknown command. Type 'help'.", 10, 13, 0
+HelpCmd        db "help", 0
+ClearCmd       db "clear", 0
+EchoCmd        db "echo", 0
+HelpMessage    db "Available commands:", 10, 13
+               db "  help - Display this help message", 10, 13
+               db "  clear - Clear the screen", 10, 13
+               db "  echo <message> - Display a message", 10, 13, 0
 InputBuffer    times MAX_INPUT_LEN db 0 ; Buffer for keyboard input
