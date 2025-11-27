@@ -2,6 +2,9 @@ BITS 16                 ; 16-bit code
 
 ORG 0x0000              ; Kernel loaded at 0x8000:0x0000, so its internal origin is 0x0000
 
+; Constants
+MAX_INPUT_LEN equ 64    ; Maximum characters for command input
+
 KernelStart:
     ; Set up segment registers for safety
     mov ax, 0x8000
@@ -12,29 +15,74 @@ KernelStart:
     mov si, KernelMessage1 ; Load address of KernelMessage1 into SI
     call PrintString       ; Call our print function
 
-    ; --- Print prompt for input ---
+TerminalLoop:
+    ; --- Print command prompt ---
     mov si, PromptMessage  ; Load address of PromptMessage into SI
     call PrintString       ; Call print function
 
-    ; --- Read a character from keyboard ---
-    call ReadKey           ; AL will contain the ASCII code
+    ; --- Read command line input ---
+    xor cx, cx             ; Initialize character count to 0
+    mov di, InputBuffer    ; Set DI to the start of the input buffer
 
-    ; --- Echo the character back to screen ---
-    mov ah, 0x0E           ; BIOS teletype function
-    mov bx, 0x0000         ; Page number (for video mode)
-    int 0x10               ; Print the character in AL
+.ReadInputLoop:
+    call ReadKey           ; Read a character into AL
 
-    ; --- Print a newline after echo ---
-    mov al, 10             ; Newline character
+    cmp al, 0x08           ; Backspace?
+    je .HandleBackspace
+
+    cmp al, 0x0D           ; Enter key?
+    je .HandleEnter
+
+    ; Echo character to screen
+    mov ah, 0x0E
+    mov bx, 0x0000
     int 0x10
-    mov al, 13             ; Carriage return character
+
+    ; Store character in buffer
+    mov [di], al
+    inc di                 ; Move to next buffer position
+    inc cx                 ; Increment character count
+
+    cmp cx, MAX_INPUT_LEN  ; Check for buffer overflow
+    jl .ReadInputLoop      ; If not full, continue reading
+    jmp .HandleEnter       ; If full, treat as enter
+
+.HandleBackspace:
+    cmp cx, 0              ; Any chars to backspace?
+    je .ReadInputLoop      ; No, ignore backspace
+
+    dec di                 ; Move back in buffer
+    dec cx                 ; Decrement character count
+
+    ; Erase character from screen: backspace, space, backspace
+    mov ah, 0x0E
+    mov al, 0x08           ; Backspace
+    int 0x10
+    mov al, ' '            ; Space
+    int 0x10
+    mov al, 0x08           ; Backspace again
+    int 0x10
+    jmp .ReadInputLoop
+
+.HandleEnter:
+    mov byte [di], 0       ; Null-terminate the input string
+    ; Print a newline after enter
+    mov al, 10
+    int 0x10
+    mov al, 13
     int 0x10
 
-    ; --- Print another message using the same function ---
-    mov si, KernelMessage2 ; Load address of KernelMessage2 into SI
-    call PrintString       ; Call print function again
+    ; --- Process Command (for now, just echo it) ---
+    mov si, EchoMessage    ; Print 'You typed: '
+    call PrintString
+    mov si, InputBuffer    ; Print the input buffer
+    call PrintString
+    mov al, 10             ; Newline
+    int 0x10
+    mov al, 13             ; Carriage return
+    int 0x10
 
-    jmp $                  ; Infinite loop to halt system
+    jmp TerminalLoop       ; Go back to prompt for next command
 
 ; --- PrintString Procedure ---
 ; Input: SI = Address of null-terminated string
@@ -61,6 +109,7 @@ ReadKey:
     ret                 ; Return from procedure
 
 ; --- Data ---
-KernelMessage1 db "Welcome to YannaOS Kernel!", 10, 13, 0 ; Null-terminated, with newline/carriage return
-PromptMessage  db "Enter a character: ", 0
-KernelMessage2 db "A new day begins in YannaOS.", 10, 13, 0 ; Another message
+KernelMessage1 db "Welcome to YannaOS Terminal!", 10, 13, 0
+PromptMessage  db "YannaOS> ", 0
+EchoMessage    db "You typed: ", 0
+InputBuffer    times MAX_INPUT_LEN db 0 ; Buffer for keyboard input
