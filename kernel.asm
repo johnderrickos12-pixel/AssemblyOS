@@ -3,16 +3,32 @@ BITS 16                 ; 16-bit code
 ORG 0x0000              ; Kernel loaded at 0x8000:0x0000, so its internal origin is 0x0000
 
 KernelStart:
-    ; Set up segment registers if needed, though bootloader set them to 0x07C0 or 0x8000
-    ; For simplicity, we'll assume ES/DS are still valid or can be reset.
-    ; Let's re-establish DS and ES for safety in the kernel context
+    ; Set up segment registers for safety
     mov ax, 0x8000
     mov ds, ax
     mov es, ax
 
     ; --- Print initial Kernel message ---
     mov si, KernelMessage1 ; Load address of KernelMessage1 into SI
-    call PrintString       ; Call our new print function
+    call PrintString       ; Call our print function
+
+    ; --- Print prompt for input ---
+    mov si, PromptMessage  ; Load address of PromptMessage into SI
+    call PrintString       ; Call print function
+
+    ; --- Read a character from keyboard ---
+    call ReadKey           ; AL will contain the ASCII code
+
+    ; --- Echo the character back to screen ---
+    mov ah, 0x0E           ; BIOS teletype function
+    mov bx, 0x0000         ; Page number (for video mode)
+    int 0x10               ; Print the character in AL
+
+    ; --- Print a newline after echo ---
+    mov al, 10             ; Newline character
+    int 0x10
+    mov al, 13             ; Carriage return character
+    int 0x10
 
     ; --- Print another message using the same function ---
     mov si, KernelMessage2 ; Load address of KernelMessage2 into SI
@@ -36,6 +52,15 @@ PrintString:
 .EndPrintLoop:
     ret                 ; Return from procedure
 
+; --- ReadKey Procedure ---
+; Output: AL = ASCII code of pressed key
+ReadKey:
+    mov ah, 0x00        ; BIOS Get Keystroke function
+    int 0x16            ; Call BIOS keyboard services
+    ; AH contains scan code, AL contains ASCII code
+    ret                 ; Return from procedure
+
 ; --- Data ---
 KernelMessage1 db "Welcome to YannaOS Kernel!", 10, 13, 0 ; Null-terminated, with newline/carriage return
+PromptMessage  db "Enter a character: ", 0
 KernelMessage2 db "A new day begins in YannaOS.", 10, 13, 0 ; Another message
