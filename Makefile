@@ -1,40 +1,39 @@
-# Makefile for YannaOS
-
-# Assembler
-NASM = nasm
-
-# Disk image utility
+AS = nasm
+LD = ld
 DD = dd
+QEMU = qemu-system-i386
 
-# Emulator
-QEMU = qemu-system-x86_64
+BOOTLOADER_ASM = bootloader.asm
+KERNEL_ASM = kernel.asm
+TEST_PROGRAM_ASM = test_program.asm ; Keep for now, will need 32-bit adaptation later
 
-# Output names
 BOOTLOADER_BIN = bootloader.bin
 KERNEL_BIN = kernel.bin
 TEST_PROGRAM_BIN = test_program.bin
-OS_IMG = yannaos.img
 
-# Default target
-all: $(OS_IMG)
+IMAGE = yannaos.img
 
-$(OS_IMG): $(BOOTLOADER_BIN) $(KERNEL_BIN) $(TEST_PROGRAM_BIN)
-	$(DD) if=/dev/zero of=$(OS_IMG) bs=512 count=2880 # 1.44MB floppy image
-	$(DD) if=$(BOOTLOADER_BIN) of=$(OS_IMG) bs=512 count=1 conv=notrunc
-	$(DD) if=$(KERNEL_BIN) of=$(OS_IMG) bs=512 seek=1 count=1 conv=notrunc
-	$(DD) if=$(TEST_PROGRAM_BIN) of=$(OS_IMG) bs=512 seek=2 count=1 conv=notrunc
+.PHONY: all clean run
 
-$(BOOTLOADER_BIN): bootloader.asm
-	$(NASM) $< -f bin -o $@
+all: $(IMAGE)
 
-$(KERNEL_BIN): kernel.asm
-	$(NASM) $< -f bin -o $@
+$(IMAGE): $(BOOTLOADER_BIN) $(KERNEL_BIN) $(TEST_PROGRAM_BIN)
+	$(DD) if=/dev/zero of=$(IMAGE) bs=512 count=2880 # 1.44MB floppy
+	$(DD) if=$(BOOTLOADER_BIN) of=$(IMAGE) bs=512 count=1 conv=notrunc
+	$(DD) if=$(KERNEL_BIN) of=$(IMAGE) bs=512 seek=1 count=1 conv=notrunc # Kernel at sector 2 (LBA 1)
+	$(DD) if=$(TEST_PROGRAM_BIN) of=$(IMAGE) bs=512 seek=2 count=1 conv=notrunc # Test program at sector 3 (LBA 2)
 
-$(TEST_PROGRAM_BIN): test_program.asm
-	$(NASM) $< -f bin -o $@
+$(BOOTLOADER_BIN): $(BOOTLOADER_ASM)
+	$(AS) $(BOOTLOADER_ASM) -f bin -o $(BOOTLOADER_BIN)
 
-run: $(OS_IMG)
-	$(QEMU) -fda $(OS_IMG)
+$(KERNEL_BIN): $(KERNEL_ASM)
+	$(AS) $(KERNEL_ASM) -f bin -o $(KERNEL_BIN)
+
+$(TEST_PROGRAM_BIN): $(TEST_PROGRAM_ASM)
+	$(AS) $(TEST_PROGRAM_ASM) -f bin -o $(TEST_PROGRAM_BIN)
+
+run: $(IMAGE)
+	$(QEMU) -fda $(IMAGE) -boot a -m 16
 
 clean:
-	rm -f $(BOOTLOADER_BIN) $(KERNEL_BIN) $(TEST_PROGRAM_BIN) $(OS_IMG)
+	rm -f $(BOOTLOADER_BIN) $(KERNEL_BIN) $(TEST_PROGRAM_BIN) $(IMAGE)
