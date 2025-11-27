@@ -1,43 +1,40 @@
-# Makefile for AssemblyOS
+# Makefile for YannaOS
 
-# Define our assembler
-AS      = nasm
-# Define our linker (we won't use a separate linker for a simple boot sector, nasm handles it)
-LD      = ld
-# Define our disk image utility
-DD      = dd
+# Assembler
+NASM = nasm
 
-# Output file names
-BOOT_BIN    = bootloader.bin
-KERNEL_BIN  = kernel.bin
-OS_IMG      = yannaos.img
+# Disk image utility
+DD = dd
 
-# Source files
-BOOT_SRC    = bootloader.asm
-KERNEL_SRC  = kernel.asm
+# Emulator
+QEMU = qemu-system-x86_64
 
-.PHONY: all clean run
+# Output names
+BOOTLOADER_BIN = bootloader.bin
+KERNEL_BIN = kernel.bin
+TEST_PROGRAM_BIN = test_program.bin
+OS_IMG = yannaos.img
 
+# Default target
 all: $(OS_IMG)
 
-$(BOOT_BIN): $(BOOT_SRC)
-	$(AS) -f bin $< -o $@
+$(OS_IMG): $(BOOTLOADER_BIN) $(KERNEL_BIN) $(TEST_PROGRAM_BIN)
+	$(DD) if=/dev/zero of=$(OS_IMG) bs=512 count=2880 # 1.44MB floppy image
+	$(DD) if=$(BOOTLOADER_BIN) of=$(OS_IMG) bs=512 count=1 conv=notrunc
+	$(DD) if=$(KERNEL_BIN) of=$(OS_IMG) bs=512 seek=1 count=1 conv=notrunc
+	$(DD) if=$(TEST_PROGRAM_BIN) of=$(OS_IMG) bs=512 seek=2 count=1 conv=notrunc
 
-$(KERNEL_BIN): $(KERNEL_SRC)
-	$(AS) -f bin $< -o $@
+$(BOOTLOADER_BIN): bootloader.asm
+	$(NASM) $< -f bin -o $@
 
-$(OS_IMG): $(BOOT_BIN) $(KERNEL_BIN)
-	# Create a 1.44MB floppy image, fill with zeros
-	$(DD) if=/dev/zero of=$(OS_IMG) bs=1024 count=1440
-	# Write the bootloader to the first sector
-	$(DD) if=$(BOOT_BIN) of=$(OS_IMG) bs=512 count=1 seek=0 conv=notrunc
-	# (For now, we won't load the kernel from the bootloader directly, it's just a placeholder)
-	# (Later, the bootloader will read the kernel from a specific sector)
-	# For demonstration, we'll just write kernel to sector 2 for now, but bootloader won't load it.
-	$(DD) if=$(KERNEL_BIN) of=$(OS_IMG) bs=512 count=1 seek=1 conv=notrunc
+$(KERNEL_BIN): kernel.asm
+	$(NASM) $< -f bin -o $@
 
-clean:
-	rm -f $(BOOT_BIN) $(KERNEL_BIN) $(OS_IMG)
+$(TEST_PROGRAM_BIN): test_program.asm
+	$(NASM) $< -f bin -o $@
 
 run: $(OS_IMG)
-	qemu-system-x86_64 -fda $(OS_IMG)
+	$(QEMU) -fda $(OS_IMG)
+
+clean:
+	rm -f $(BOOTLOADER_BIN) $(KERNEL_BIN) $(TEST_PROGRAM_BIN) $(OS_IMG)
